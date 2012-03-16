@@ -114,6 +114,7 @@ module Padrino
       def safe_load(file, options={})
         began_at    = Time.now
         force, file = options[:force], figure_path(file)
+	loaded = false
 
         # Check if file was changed or if force a reload
         reload = MTIMES[file] && File.mtime(file) > MTIMES[file]
@@ -152,19 +153,22 @@ module Padrino
           logger.error "Cannot require #{file} due to a syntax error: #{e.message}"
         ensure
           $-v = verbosity_was
-          new_constants = (ObjectSpace.classes - klasses).uniq
-          if loaded
-            # Store the file details
-            LOADED_CLASSES[file] = new_constants
-            LOADED_FILES[file]   = ($LOADED_FEATURES - files - [file]).uniq
-            # Track only features in our Padrino.root
-            LOADED_FILES[file].delete_if { |feature| !in_root?(feature) }
-          else
-            logger.devel "Failed to load #{file}; removing partially defined constants"
-            new_constants.each { |klass| remove_constant(klass) }
+          Thread.start do
+            new_constants = (ObjectSpace.classes - klasses).uniq
+            if loaded
+              # Store the file details
+              LOADED_CLASSES[file] = new_constants
+              LOADED_FILES[file]   = ($LOADED_FEATURES - files - [file]).uniq
+              # Track only features in our Padrino.root
+              LOADED_FILES[file].delete_if { |feature| !in_root?(feature) }
+            else
+              logger.devel "Failed to load #{file}; removing partially defined constants"
+              new_constants.each { |klass| remove_constant(klass) }
+            end
           end
-
         end
+
+	loaded
       end
 
       ##

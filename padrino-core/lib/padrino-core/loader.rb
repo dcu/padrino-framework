@@ -67,7 +67,7 @@ module Padrino
       Padrino.require_dependencies("#{root}/config/database.rb", :nodeps => true) # Be sure to don't remove constants from dbs.
       Padrino::Reloader.lock! # Now we can remove constant from here to down
       Padrino.before_load.each(&:call) # Run before hooks
-      Padrino.dependency_paths.each { |path| Padrino.require_dependencies(path) }
+      Padrino.require_dependencies *Padrino.dependency_paths
       Padrino.after_load.each(&:call) # Run after hooks
       Padrino::Reloader.run!
       Thread.current[:padrino_loaded] = true
@@ -148,6 +148,16 @@ module Padrino
       # Extract all files to load
       files = paths.flatten.map { |path| Dir[path] }.flatten.uniq.sort
 
+      ordering = Padrino.root(".files_#{Digest::MD5.hexdigest(paths.sort.to_s)}")
+      if File.exist?(ordering)
+        lines = File.read(ordering).split(/\r?\n/)
+
+        files.sort_by! do |f|
+          lines.index(f).to_i
+        end
+      end
+
+      loading_order = []
       while files.present?
         # List of errors and failed files
         errors, failed = [], []
@@ -158,10 +168,12 @@ module Padrino
         # Now we try to require our dependencies, we dup files
         # so we don't perform delete on the original array during
         # iteration, this prevent problems with rubinus
+
         files.dup.each do |file|
           begin
-            Padrino::Reloader.safe_load(file, options.dup)
+            loaded = Padrino::Reloader.safe_load(file, options.dup)
             files.delete(file)
+            loading_order << file
           rescue LoadError => e
             errors << e
             failed << file
@@ -176,6 +188,12 @@ module Padrino
         # Stop processing if nothing loads or if everything has loaded
         raise errors.last if files.size == size_at_start && files.present?
         break if files.empty?
+      end
+
+      if loading_order.size > 2
+        File.open(ordering, "w") do |f|
+          f.write(loading_order.join("\n"))
+        end
       end
     end
 
